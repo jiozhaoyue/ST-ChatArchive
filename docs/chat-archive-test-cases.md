@@ -28,6 +28,8 @@ npm run test:core
 2. 重启或刷新 Luker。
 3. 在“扩展”设置中找到“聊天归档包”，打开主面板。
 
+若要从本地仓库导入，请先按 [安装说明](./chat-archive-installation.md) 启动本地 `http://` smart Git 服务；不要用 `python -m http.server`。
+
 场景：
 
 - 当前聊天应显示为“当前，禁选”，不能被勾选。

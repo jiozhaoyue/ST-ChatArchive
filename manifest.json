@@ -1,0 +1,12 @@
+{
+  "name": "chat-archive-pack",
+  "display_name": "聊天归档包",
+  "version": "0.1.0",
+  "author": "Codex",
+  "description": "Archive multiple Luker/SillyTavern character chats into a stable JSON pack and materialize chats back to native .jsonl files.",
+  "loading_order": 50,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css"
+}

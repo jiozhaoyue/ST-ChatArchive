@@ -5,7 +5,7 @@ import { buildChatSelectionModel, planConsolidationDelete } from './operations.j
 import { createLukerAdapter, downloadJson, ensureExtensionSettings, rememberPack, tryUploadPack } from './luker-adapter.js';
 
 const EXTENSION_NAME = 'chat-archive-pack';
-const SETTINGS_TEMPLATE = `/scripts/extensions/third-party/${EXTENSION_NAME}/settings.html`;
+const SETTINGS_TEMPLATE = new URL('./settings.html', import.meta.url);
 
 const state = {
   panel: null,
