@@ -1,0 +1,111 @@
+.chat-archive-pack-settings {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #888), transparent 40%);
+  border-radius: 10px;
+}
+
+.chat-archive-pack-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.chat-archive-pack-heading small {
+  display: block;
+  opacity: 0.75;
+}
+
+#chat_archive_pack_panel {
+  position: fixed;
+  inset: 6vh 5vw;
+  z-index: 40000;
+  display: none;
+  grid-template-rows: auto 1fr auto;
+  gap: 1rem;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(80, 170, 130, 0.2), transparent 30%),
+    var(--SmartThemeBlurTintColor, #1f2229);
+  border: 1px solid var(--SmartThemeBorderColor, #777);
+  border-radius: 16px;
+  box-shadow: 0 18px 80px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+#chat_archive_pack_panel.open {
+  display: grid;
+}
+
+.chat-archive-pack-panel-head,
+.chat-archive-pack-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.chat-archive-pack-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(280px, 1.15fr);
+  gap: 1rem;
+  min-height: 0;
+}
+
+.chat-archive-pack-card {
+  min-height: 0;
+  padding: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #888), transparent 45%);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.14);
+  overflow: auto;
+}
+
+.chat-archive-pack-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.chat-archive-pack-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.chat-archive-pack-row.current {
+  opacity: 0.6;
+}
+
+.chat-archive-pack-reader-floor {
+  margin-bottom: 0.65rem;
+  padding: 0.65rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.chat-archive-pack-muted {
+  opacity: 0.7;
+}
+
+@media (max-width: 760px) {
+  #chat_archive_pack_panel {
+    inset: 2vh 2vw;
+  }
+
+  .chat-archive-pack-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-archive-pack-panel-head,
+  .chat-archive-pack-actions,
+  .chat-archive-pack-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
