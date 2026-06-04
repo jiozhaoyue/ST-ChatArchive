@@ -1,8 +1,9 @@
-import { getContext, registerExtensionApi } from '../../../extensions.js';
+import { getContext } from '../../../extensions.js';
 
 import { buildArchivePack, findNearDuplicateTexts, materializeChat, validateRoundTrip } from './archive-core.js';
 import { buildChatSelectionModel, planConsolidationDelete } from './operations.js';
 import { createLukerAdapter, downloadJson, ensureExtensionSettings, rememberPack, tryUploadPack } from './luker-adapter.js';
+import { applyThemePreference } from './theme.js';
 
 const EXTENSION_NAME = 'chat-archive-pack';
 const SETTINGS_TEMPLATE = new URL('./settings.html', import.meta.url);
@@ -54,8 +55,14 @@ async function renderSettings() {
   document.querySelector('#chat_archive_pack_auto_update').checked = Boolean(settings.options.autoUpdate);
   document.querySelector('#chat_archive_pack_auto_delete').checked = Boolean(settings.options.autoDelete);
   document.querySelector('#chat_archive_pack_delete_default').checked = settings.options.deleteByDefault !== false;
+  document.querySelector('#chat_archive_pack_theme').value = applyThemePreference(settings.options.theme);
 
   document.querySelector('#chat_archive_pack_open')?.addEventListener('click', openPanel);
+  document.querySelector('#chat_archive_pack_theme')?.addEventListener('change', (event) => {
+    settings.options.theme = applyThemePreference(event.currentTarget.value);
+    context.saveSettingsDebounced?.();
+  });
+
   for (const [id, key] of [
     ['#chat_archive_pack_auto_update', 'autoUpdate'],
     ['#chat_archive_pack_auto_delete', 'autoDelete'],
@@ -399,7 +406,9 @@ function scheduleAutoTask() {
 }
 
 function registerApi() {
-  registerExtensionApi?.(EXTENSION_NAME, {
+  const context = getContext();
+  const registerExtensionApi = context?.registerExtensionApi;
+  registerExtensionApi?.call(context, EXTENSION_NAME, {
     buildArchivePack,
     materializeChat,
     archiveSelected,
@@ -407,7 +416,14 @@ function registerApi() {
   });
 }
 
+function applyConfiguredTheme() {
+  const context = getContext();
+  const settings = ensureExtensionSettings(context);
+  settings.options.theme = applyThemePreference(settings.options.theme);
+}
+
 async function init() {
+  applyConfiguredTheme();
   registerApi();
   await renderSettings();
   createPanel();

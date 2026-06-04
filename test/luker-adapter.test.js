@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createLukerAdapter } from '../public/scripts/extensions/third-party/chat-archive-pack/luker-adapter.js';
+import {
+  createLukerAdapter,
+  ensureExtensionSettings,
+} from '../public/scripts/extensions/third-party/chat-archive-pack/luker-adapter.js';
 
 describe('luker adapter', () => {
   it('lists current character chats using getPastCharacterChats', async () => {
@@ -16,6 +19,23 @@ describe('luker adapter', () => {
     const chats = await adapter.listChats();
 
     assert.deepEqual(chats.map(chat => chat.fileName), ['main', 'branch-a']);
+  });
+
+  it('defaults extension theme preference to system for older settings', () => {
+    const context = {
+      extensionSettings: {
+        chatArchivePack: {
+          options: {
+            autoUpdate: true,
+          },
+        },
+      },
+    };
+
+    const settings = ensureExtensionSettings(context);
+
+    assert.equal(settings.options.theme, 'system');
+    assert.equal(settings.options.autoUpdate, true);
   });
 
   it('reads and saves character chats with the Luker chat endpoint payload shape', async () => {

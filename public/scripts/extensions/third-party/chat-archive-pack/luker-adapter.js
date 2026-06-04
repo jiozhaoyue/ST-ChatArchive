@@ -1,3 +1,5 @@
+import { normalizeThemeMode } from './theme.js';
+
 const EXTENSION_KEY = 'chatArchivePack';
 
 function normalizeFileName(fileName) {
@@ -40,12 +42,14 @@ export function ensureExtensionSettings(context) {
   const settings = root[EXTENSION_KEY];
   settings.packs ||= {};
   settings.bindings ||= {};
-  settings.options ||= {
+  settings.options = {
     autoUpdate: false,
     autoDelete: false,
     deleteByDefault: true,
     intervalMinutes: 30,
+    ...settings.options,
   };
+  settings.options.theme = normalizeThemeMode(settings.options.theme);
 
   return settings;
 }

@@ -22,6 +22,7 @@ public/scripts/extensions/third-party/chat-archive-pack/index.js
 public/scripts/extensions/third-party/chat-archive-pack/archive-core.js
 public/scripts/extensions/third-party/chat-archive-pack/operations.js
 public/scripts/extensions/third-party/chat-archive-pack/luker-adapter.js
+public/scripts/extensions/third-party/chat-archive-pack/theme.js
 public/scripts/extensions/third-party/chat-archive-pack/settings.html
 public/scripts/extensions/third-party/chat-archive-pack/style.css
 ```
