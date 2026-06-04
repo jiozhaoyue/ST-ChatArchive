@@ -19,6 +19,7 @@ public/scripts/extensions/third-party/
 ```text
 public/scripts/extensions/third-party/chat-archive-pack/manifest.json
 public/scripts/extensions/third-party/chat-archive-pack/index.js
+public/scripts/extensions/third-party/chat-archive-pack/app.js
 public/scripts/extensions/third-party/chat-archive-pack/archive-core.js
 public/scripts/extensions/third-party/chat-archive-pack/operations.js
 public/scripts/extensions/third-party/chat-archive-pack/luker-adapter.js
