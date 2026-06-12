@@ -70,5 +70,7 @@ export function getContext() {
     assert.equal(registrations.length, 1);
     assert.equal(registrations[0].name, 'chat-archive-pack');
     assert.equal(typeof registrations[0].api.buildArchivePack, 'function');
+    assert.equal(typeof registrations[0].api.materializeOriginalJsonl, 'function');
+    assert.equal(typeof registrations[0].api.materializePathChat, 'function');
   });
 });

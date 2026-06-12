@@ -1,1 +1,11 @@
 .tmp-git/
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
+.env
+.idea/
+.history
+skills
+CONTEXT.md

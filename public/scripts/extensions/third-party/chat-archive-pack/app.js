@@ -1,4 +1,11 @@
-import { buildArchivePack, findNearDuplicateTexts, materializeChat, validateRoundTrip } from './archive-core.js';
+import {
+  buildArchivePack,
+  findNearDuplicateTexts,
+  materializeChat,
+  materializeOriginalJsonl,
+  materializePathChat,
+  validateRoundTrip,
+} from './archive-core.js';
 import { buildChatSelectionModel, planConsolidationDelete } from './operations.js';
 import { createLukerAdapter, downloadJson, ensureExtensionSettings, rememberPack, tryUploadPack } from './luker-adapter.js';
 import { applyThemePreference } from './theme.js';
@@ -9,9 +16,17 @@ let SETTINGS_TEMPLATE = null;
 
 const state = {
   panel: null,
+  activeTab: 'manager',
   selected: new Set(),
   chats: [],
   pack: null,
+  pendingPack: null,
+  releaseLog: [],
+  graphView: 'skeleton',
+  graphLayout: 'down',
+  graphEditMode: false,
+  currentPathId: '',
+  selectedGroupId: '',
   timer: null,
 };
 
@@ -86,50 +101,132 @@ function createPanel() {
     <div class="chat-archive-pack-panel-head">
       <div>
         <h3>聊天归档包</h3>
-        <div class="chat-archive-pack-muted">当前角色卡范围内归档、释放和阅读聊天。</div>
+        <div class="chat-archive-pack-muted">管理原生 jsonl，生成归档 JSON，并查看归档内的剧情结构。</div>
       </div>
-      <button class="menu_button" data-cap-action="close">关闭</button>
+      <div class="chat-archive-pack-head-actions">
+        <button class="menu_button" data-cap-action="refresh">刷新</button>
+        <button class="menu_button" data-cap-action="close">关闭</button>
+      </div>
     </div>
-    <div class="chat-archive-pack-grid">
-      <div class="chat-archive-pack-card">
-        <h4>当前角色聊天</h4>
-        <div class="chat-archive-pack-actions">
-          <button class="menu_button" data-cap-action="refresh">刷新</button>
-          <button class="menu_button" data-cap-action="select-all">全选非当前</button>
-          <button class="menu_button" data-cap-action="invert">反选</button>
-          <button class="menu_button" data-cap-action="clear">取消</button>
+
+    <nav class="chat-archive-pack-tabs" aria-label="聊天归档包面板">
+      <button class="menu_button" data-cap-tab="manager">归档管理</button>
+      <button class="menu_button" data-cap-tab="graph">结构图</button>
+      <button class="menu_button" data-cap-tab="duplicates">重复候选</button>
+      <button class="menu_button" data-cap-tab="releases">释放记录</button>
+    </nav>
+
+    <div class="chat-archive-pack-tab-body">
+      <section class="chat-archive-pack-tab-panel" data-cap-panel="manager">
+        <div class="chat-archive-pack-manager-grid">
+          <div class="chat-archive-pack-pane">
+            <div class="chat-archive-pack-pane-head">
+              <h4>当前角色 jsonl</h4>
+              <div class="chat-archive-pack-actions compact">
+                <button class="menu_button" data-cap-action="select-all">全选非当前</button>
+                <button class="menu_button" data-cap-action="invert">反选</button>
+                <button class="menu_button" data-cap-action="clear">取消</button>
+              </div>
+            </div>
+            <div id="chat_archive_pack_chat_list" class="chat-archive-pack-list"></div>
+          </div>
+
+          <div class="chat-archive-pack-pane">
+            <div class="chat-archive-pack-pane-head">
+              <h4>归档包</h4>
+              <label class="menu_button">
+                导入 JSON
+                <input id="chat_archive_pack_import" type="file" accept="application/json" hidden>
+              </label>
+            </div>
+            <label class="chat-archive-pack-field">归档包名称 <input id="chat_archive_pack_name" class="text_pole" value="聊天归档包"></label>
+            <div id="chat_archive_pack_pack_list" class="chat-archive-pack-list"></div>
+          </div>
+
+          <div class="chat-archive-pack-pane">
+            <div class="chat-archive-pack-pane-head">
+              <h4>合并预览</h4>
+              <button class="menu_button" data-cap-action="preview-merge">生成预览</button>
+            </div>
+            <div id="chat_archive_pack_summary" class="chat-archive-pack-summary">还没有加载归档包。</div>
+            <div id="chat_archive_pack_merge_preview" class="chat-archive-pack-preview">选择 jsonl 后生成审查预览。</div>
+            <div class="chat-archive-pack-actions stack">
+              <button class="menu_button" data-cap-action="confirm-merge">确认写入归档</button>
+              <label><input id="chat_archive_pack_delete_after" type="checkbox"> 收束后删除已归档的非当前 .jsonl</label>
+              <button class="menu_button" data-cap-action="consolidate">确认归档并收束删除</button>
+            </div>
+          </div>
         </div>
-        <div id="chat_archive_pack_chat_list" class="chat-archive-pack-list"></div>
-      </div>
-      <div class="chat-archive-pack-card">
-        <h4>归档包</h4>
-        <label>归档包名称 <input id="chat_archive_pack_name" class="text_pole" value="聊天归档包"></label>
-        <div id="chat_archive_pack_summary" class="chat-archive-pack-muted">还没有加载归档包。</div>
-        <hr>
-        <label>释放聊天 <select id="chat_archive_pack_release_select"></select></label>
-        <button class="menu_button" data-cap-action="release">释放为 .jsonl</button>
-        <button class="menu_button" data-cap-action="export">导出 JSON</button>
-        <label class="menu_button">
-          导入 JSON
-          <input id="chat_archive_pack_import" type="file" accept="application/json" hidden>
-        </label>
-        <hr>
-        <h4>基础阅读器</h4>
-        <div id="chat_archive_pack_reader"></div>
-      </div>
+
+      </section>
+
+      <section class="chat-archive-pack-tab-panel" data-cap-panel="graph">
+        <div class="chat-archive-pack-graph-toolbar">
+          <label>路径 <select id="chat_archive_pack_path_select"></select></label>
+          <label>视图 <select id="chat_archive_pack_graph_view">
+            <option value="skeleton">骨架视图</option>
+            <option value="path">路径视图</option>
+            <option value="full">全图视图</option>
+          </select></label>
+          <label>展开 <select id="chat_archive_pack_graph_layout">
+            <option value="down">向下</option>
+            <option value="right">向右</option>
+          </select></label>
+          <label><input id="chat_archive_pack_edit_mode" type="checkbox"> 编辑模式</label>
+        </div>
+        <div class="chat-archive-pack-graph-grid">
+          <div id="chat_archive_pack_path_list" class="chat-archive-pack-pane"></div>
+          <div id="chat_archive_pack_graph_canvas" class="chat-archive-pack-graph-canvas"></div>
+          <div id="chat_archive_pack_inspector" class="chat-archive-pack-pane"></div>
+        </div>
+      </section>
+
+      <section class="chat-archive-pack-tab-panel" data-cap-panel="duplicates">
+        <div id="chat_archive_pack_duplicates" class="chat-archive-pack-pane"></div>
+      </section>
+
+      <section class="chat-archive-pack-tab-panel" data-cap-panel="releases">
+        <div class="chat-archive-pack-release-grid">
+          <div class="chat-archive-pack-pane">
+            <h4>释放</h4>
+            <label>原文件 <select id="chat_archive_pack_original_release_select"></select></label>
+            <button class="menu_button" data-cap-action="release-original">无损释放原文件</button>
+            <button class="menu_button" data-cap-action="release-path">释放当前路径</button>
+          </div>
+          <div id="chat_archive_pack_release_log" class="chat-archive-pack-pane"></div>
+        </div>
+      </section>
     </div>
-    <div class="chat-archive-pack-actions">
-      <label><input id="chat_archive_pack_delete_after" type="checkbox"> 收束后删除已归档的非当前 .jsonl</label>
-      <div>
-        <button class="menu_button" data-cap-action="archive">更新归档</button>
-        <button class="menu_button" data-cap-action="consolidate">收束删除</button>
+
+    <div class="chat-archive-pack-statusbar">
+      <div id="chat_archive_pack_status">未加载归档包。</div>
+      <div class="chat-archive-pack-actions compact">
+        <button class="menu_button" data-cap-action="open-graph">打开结构图</button>
+        <button class="menu_button" data-cap-action="export">导出 JSON</button>
+        <button class="menu_button" data-cap-action="release-path">释放当前路径</button>
       </div>
     </div>
   `;
 
   panel.addEventListener('click', onPanelClick);
   panel.querySelector('#chat_archive_pack_import')?.addEventListener('change', onImportPack);
-  panel.querySelector('#chat_archive_pack_release_select')?.addEventListener('change', renderReader);
+  panel.querySelector('#chat_archive_pack_path_select')?.addEventListener('change', (event) => {
+    state.currentPathId = event.currentTarget.value;
+    renderGraphWorkspace();
+    renderStatusBar();
+  });
+  panel.querySelector('#chat_archive_pack_graph_view')?.addEventListener('change', (event) => {
+    state.graphView = event.currentTarget.value;
+    renderGraphWorkspace();
+  });
+  panel.querySelector('#chat_archive_pack_graph_layout')?.addEventListener('change', (event) => {
+    state.graphLayout = event.currentTarget.value;
+    renderGraphWorkspace();
+  });
+  panel.querySelector('#chat_archive_pack_edit_mode')?.addEventListener('change', (event) => {
+    state.graphEditMode = Boolean(event.currentTarget.checked);
+    renderGraphWorkspace();
+  });
   document.body.append(panel);
   state.panel = panel;
   return panel;
@@ -142,7 +239,7 @@ async function openPanel() {
   panel.querySelector('#chat_archive_pack_delete_after').checked = settings.options.deleteByDefault !== false;
   panel.classList.add('open');
   await refreshChats();
-  renderPackSummary();
+  renderWorkbench();
 }
 
 function closePanel() {
@@ -199,9 +296,7 @@ function setSelection(mode) {
   refreshChats();
 }
 
-async function archiveSelected({ deleteAfter = false, requireConfirm = true } = {}) {
-  const context = getContext();
-  const adapter = createLukerAdapter(context);
+async function readSelectedChats(adapter) {
   const selectedFileNames = [...state.selected].filter(Boolean);
   if (!selectedFileNames.length) {
     notify('warning', '请先选择至少一个非当前聊天。');
@@ -212,20 +307,55 @@ async function archiveSelected({ deleteAfter = false, requireConfirm = true } = 
   for (const fileName of selectedFileNames) {
     chats.push({ fileName, chat: await adapter.getChat(fileName) });
   }
+  return { selectedFileNames, chats };
+}
 
-  const packName = document.querySelector('#chat_archive_pack_name')?.value || '聊天归档包';
-  const pack = buildArchivePack({ packName, avatar: adapter.currentAvatar, chats });
-
+function validatePackSources(pack, chats) {
   for (const entry of chats) {
     const restored = materializeChat(pack, entry.fileName);
     const result = validateRoundTrip(entry.chat, restored);
     if (!result.ok) {
       notify('error', `校验失败：${entry.fileName}，不会删除任何聊天。`);
+      return false;
+    }
+  }
+  return true;
+}
+
+async function previewSelectedArchive() {
+  const adapter = createLukerAdapter(getContext());
+  const selection = await readSelectedChats(adapter);
+  if (!selection) {
+    return null;
+  }
+
+  const packName = document.querySelector('#chat_archive_pack_name')?.value || '聊天归档包';
+  const pack = buildArchivePack({ packName, avatar: adapter.currentAvatar, chats: selection.chats });
+  if (!validatePackSources(pack, selection.chats)) {
+    return null;
+  }
+
+  state.pendingPack = pack;
+  notify('info', `已生成合并预览：${pack.graph.paths.length} 条路径。`);
+  renderWorkbench();
+  return pack;
+}
+
+async function commitPendingArchive({ deleteAfter = false, requireConfirm = true } = {}) {
+  if (!state.pendingPack) {
+    const preview = await previewSelectedArchive();
+    if (!preview) {
       return null;
     }
   }
 
+  const context = getContext();
+  const adapter = createLukerAdapter(context);
+  const selectedFileNames = [...state.selected].filter(Boolean);
+  const pack = state.pendingPack;
   state.pack = pack;
+  state.pendingPack = null;
+  state.currentPathId = pack.graph?.activePathId || pack.graph?.paths?.[0]?.id || '';
   rememberPack(context, pack);
   const upload = await tryUploadPack(context, pack);
   if (!upload.ok) {
@@ -253,24 +383,76 @@ async function archiveSelected({ deleteAfter = false, requireConfirm = true } = 
       notify('info', `已跳过 ${deletePlan.blocked.length} 个受保护聊天。`);
     }
   } else {
-    notify('success', `已更新归档：${pack.chats.length} 个聊天。`);
+    notify('success', `已写入归档：${pack.graph.paths.length} 条路径。`);
   }
 
-  renderPackSummary();
+  renderWorkbench();
   await refreshChats();
   return pack;
 }
 
-async function releaseSelectedChat() {
+async function archiveSelected({ deleteAfter = false, requireConfirm = true } = {}) {
+  const context = getContext();
+  const adapter = createLukerAdapter(context);
+  const selection = await readSelectedChats(adapter);
+  if (!selection) {
+    return null;
+  }
+
+  const packName = document.querySelector('#chat_archive_pack_name')?.value || '聊天归档包';
+  const pack = buildArchivePack({ packName, avatar: adapter.currentAvatar, chats: selection.chats });
+
+  if (!validatePackSources(pack, selection.chats)) {
+    return null;
+  }
+
+  state.pack = pack;
+  rememberPack(context, pack);
+  const upload = await tryUploadPack(context, pack);
+  if (!upload.ok) {
+    notify('warning', `归档已保存到扩展设置；文件上传不可用：${upload.reason}`);
+  }
+
+  if (deleteAfter) {
+    const deletePlan = planConsolidationDelete({
+      chatFiles: state.chats.map(chat => chat.fileName),
+      currentFileName: adapter.currentFileName,
+      selectedFileNames: selection.selectedFileNames,
+    });
+
+    if (deletePlan.deletableFileNames.length) {
+      const message = `确认删除这些非当前聊天？\n${deletePlan.deletableFileNames.join('\n')}`;
+      if (!requireConfirm || window.confirm(message)) {
+        for (const fileName of deletePlan.deletableFileNames) {
+          await adapter.deleteChat(fileName);
+        }
+        notify('success', `已归档并删除 ${deletePlan.deletableFileNames.length} 个聊天。`);
+      }
+    }
+
+    if (deletePlan.blocked.length) {
+      notify('info', `已跳过 ${deletePlan.blocked.length} 个受保护聊天。`);
+    }
+  } else {
+    notify('success', `已更新归档：${pack.chats.length} 个聊天。`);
+  }
+
+  renderWorkbench();
+  await refreshChats();
+  return pack;
+}
+
+async function releasePathChat() {
   const pack = state.pack;
-  const fileName = document.querySelector('#chat_archive_pack_release_select')?.value;
-  if (!pack || !fileName) {
-    notify('warning', '请先加载归档包并选择要释放的聊天。');
+  const pathId = state.currentPathId || pack?.graph?.activePathId;
+  if (!pack || !pathId) {
+    notify('warning', '请先加载归档包并选择要释放的路径。');
     return;
   }
 
   const adapter = createLukerAdapter(getContext());
-  let targetFileName = normalizeFileName(fileName);
+  const path = pack.graph?.paths?.find(item => item.id === pathId) || pack.graph?.paths?.[0];
+  let targetFileName = normalizeFileName(`${path?.sourceFileName || 'archive-path'}-materialized`);
   if (await adapter.chatExists(targetFileName)) {
     const renamed = window.prompt('同名 .jsonl 已存在，请输入新的聊天文件名：', `${targetFileName}-materialized`);
     if (!renamed || await adapter.chatExists(renamed)) {
@@ -280,53 +462,308 @@ async function releaseSelectedChat() {
     targetFileName = normalizeFileName(renamed);
   }
 
-  const chat = materializeChat(pack, fileName, { target: 'luker' });
+  const chat = materializePathChat(pack, pathId, { target: 'luker' });
   const ok = await adapter.saveChat(targetFileName, chat);
-  notify(ok ? 'success' : 'error', ok ? `已释放：${targetFileName}.jsonl` : '释放失败。');
+  state.releaseLog.unshift({
+    type: 'path',
+    fileName: targetFileName,
+    at: new Date().toLocaleString(),
+    ok,
+  });
+  notify(ok ? 'success' : 'error', ok ? `已释放路径：${targetFileName}.jsonl` : '释放失败。');
+  renderWorkbench();
   await refreshChats();
+}
+
+async function releaseOriginalChat() {
+  const pack = state.pack;
+  const fileName = document.querySelector('#chat_archive_pack_original_release_select')?.value;
+  if (!pack || !fileName) {
+    notify('warning', '请先加载归档包并选择原文件。');
+    return;
+  }
+
+  const adapter = createLukerAdapter(getContext());
+  let targetFileName = normalizeFileName(fileName);
+  if (await adapter.chatExists(targetFileName)) {
+    const renamed = window.prompt('同名 .jsonl 已存在，请输入新的聊天文件名：', `${targetFileName}-restored`);
+    if (!renamed || await adapter.chatExists(renamed)) {
+      notify('warning', '释放取消：不能覆盖已有聊天。');
+      return;
+    }
+    targetFileName = normalizeFileName(renamed);
+  }
+
+  const rawJsonl = materializeOriginalJsonl(pack, fileName);
+  const rows = rawJsonl.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+  const ok = await adapter.saveChat(targetFileName, rows);
+  state.releaseLog.unshift({
+    type: 'original',
+    fileName: targetFileName,
+    at: new Date().toLocaleString(),
+    ok,
+  });
+  notify(ok ? 'success' : 'error', ok ? `已释放原文件：${targetFileName}.jsonl` : '释放失败。');
+  renderWorkbench();
+  await refreshChats();
+}
+
+function renderWorkbench() {
+  renderTabs();
+  renderPackList();
+  renderPackSummary();
+  renderMergePreview();
+  renderGraphWorkspace();
+  renderDuplicateCandidates();
+  renderReleasePanel();
+  renderStatusBar();
+}
+
+function renderTabs() {
+  document.querySelectorAll('[data-cap-tab]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.capTab === state.activeTab);
+  });
+  document.querySelectorAll('[data-cap-panel]').forEach((panel) => {
+    panel.classList.toggle('active', panel.dataset.capPanel === state.activeTab);
+  });
+}
+
+function renderPackList() {
+  const container = document.querySelector('#chat_archive_pack_pack_list');
+  if (!container) {
+    return;
+  }
+
+  const settings = ensureExtensionSettings(getContext());
+  const summaries = Object.values(settings.packs || {});
+  if (!summaries.length && !state.pack) {
+    container.innerHTML = '<div class="chat-archive-pack-muted">还没有归档包。生成预览并确认后会出现在这里。</div>';
+    return;
+  }
+
+  const rows = summaries.map((summary) => `
+    <button class="chat-archive-pack-pack-row ${state.pack?.packId === summary.packId ? 'active' : ''}" data-cap-pack="${summary.packId}">
+      <strong>${escapeHtml(summary.packName || summary.packId)}</strong>
+      <small>${summary.chatCount ?? 0} 个原聊天 · ${escapeHtml(summary.updatedAt || '')}</small>
+    </button>
+  `);
+  container.innerHTML = rows.join('');
 }
 
 function renderPackSummary() {
   const summary = document.querySelector('#chat_archive_pack_summary');
-  const select = document.querySelector('#chat_archive_pack_release_select');
-  if (!summary || !select) {
+  if (!summary) {
     return;
   }
 
   const pack = state.pack;
   if (!pack) {
     summary.textContent = '还没有加载归档包。';
-    select.innerHTML = '';
-    renderReader();
     return;
   }
 
+  const preview = pack.mergePreview || {};
   const nearDuplicates = findNearDuplicateTexts(pack);
-  summary.textContent = `${pack.packName}：${pack.chats.length} 个聊天，${Object.keys(pack.contentBlocks).length} 个内容块，${nearDuplicates.length} 个疑似重复。`;
-  select.innerHTML = pack.chats.map(chat => `<option value="${chat.fileName}">${chat.fileName} · ${chat.messageCount} 楼 · ${chat.swipeCount} swipe</option>`).join('');
-  renderReader();
+  summary.innerHTML = `
+    <strong>${escapeHtml(pack.packName)}</strong>
+    <div>${pack.chats?.length || 0} 个原聊天 · ${pack.graph?.paths?.length || 0} 条路径 · ${preview.graphGroupCount ?? 0} 个分支分组</div>
+    <div>${Object.keys(pack.contentBlocks || {}).length} 个内容块 · ${nearDuplicates.length} 个疑似重复 · 无损账本${preview.restoreLedgerOk ? '正常' : '异常'}</div>
+  `;
 }
 
-function renderReader() {
-  const reader = document.querySelector('#chat_archive_pack_reader');
-  const fileName = document.querySelector('#chat_archive_pack_release_select')?.value;
-  if (!reader) {
+function renderMergePreview() {
+  const container = document.querySelector('#chat_archive_pack_merge_preview');
+  if (!container) {
     return;
   }
 
-  const chat = state.pack?.chats?.find(item => item.fileName === fileName);
-  if (!chat) {
-    reader.textContent = '选择归档包内的聊天后可预览。';
+  const pack = state.pendingPack || state.pack;
+  if (!pack?.mergePreview) {
+    container.textContent = '选择 jsonl 后生成审查预览。';
     return;
   }
 
-  reader.innerHTML = chat.floors.map((floor) => {
-    const variants = floor.variants.map((variant, index) => {
-      const text = state.pack.contentBlocks[variant.contentBlockId]?.text || '';
-      return `<div><strong>${variant.active ? '当前' : `变体 ${index + 1}`}</strong>：${escapeHtml(text).slice(0, 500)}</div>`;
-    }).join('');
-    return `<div class="chat-archive-pack-reader-floor"><strong>${floor.index + 1}. ${escapeHtml(floor.name || (floor.isUser ? 'User' : 'Assistant'))}</strong>${variants}</div>`;
+  const preview = pack.mergePreview;
+  container.innerHTML = `
+    <div class="chat-archive-pack-kpis">
+      <span>${preview.sourceFileCount} 个源文件</span>
+      <span>${preview.pathCount} 条路径</span>
+      <span>${preview.commonPrefixFloors} 楼共同前缀</span>
+      <span>${preview.graphGroupCount} 个分支分组</span>
+    </div>
+    <ul>
+      <li>原始行账本：${preview.rawLineCount} 行，${preview.restoreLedgerOk ? '可还原' : '存在缺口'}</li>
+      <li>内容块：${preview.contentBlockCount} 个，共享内容块 ${preview.sharedContentBlockCount} 个</li>
+      <li>同文本不同上下文：${preview.sameTextDifferentContextCount} 处，仅共享内容，不合并分组</li>
+      <li>近似重复候选：${preview.nearDuplicateCount} 处</li>
+    </ul>
+  `;
+}
+
+function getCurrentPath() {
+  const pack = state.pack;
+  if (!pack?.graph?.paths?.length) {
+    return null;
+  }
+  return pack.graph.paths.find(path => path.id === state.currentPathId) || pack.graph.paths[0];
+}
+
+function getNodeLabel(group) {
+  return group.title || group.summary || group.autoTitle || group.id;
+}
+
+function renderGraphWorkspace() {
+  const pathSelect = document.querySelector('#chat_archive_pack_path_select');
+  const pathList = document.querySelector('#chat_archive_pack_path_list');
+  const canvas = document.querySelector('#chat_archive_pack_graph_canvas');
+  const inspector = document.querySelector('#chat_archive_pack_inspector');
+  if (!pathSelect || !pathList || !canvas || !inspector) {
+    return;
+  }
+
+  const pack = state.pack;
+  if (!pack?.graph?.paths?.length) {
+    pathSelect.innerHTML = '';
+    pathList.textContent = '归档包生成后可查看路径。';
+    canvas.textContent = '还没有结构图。请先在归档管理中合并 jsonl。';
+    inspector.textContent = '选择节点后显示详情。';
+    return;
+  }
+
+  if (!state.currentPathId) {
+    state.currentPathId = pack.graph.activePathId || pack.graph.paths[0].id;
+  }
+  const currentPath = getCurrentPath();
+  pathSelect.innerHTML = pack.graph.paths.map(path => `<option value="${path.id}" ${path.id === currentPath.id ? 'selected' : ''}>${escapeHtml(path.title || path.sourceFileName)}</option>`).join('');
+  document.querySelector('#chat_archive_pack_graph_view').value = state.graphView;
+  document.querySelector('#chat_archive_pack_graph_layout').value = state.graphLayout;
+  document.querySelector('#chat_archive_pack_edit_mode').checked = state.graphEditMode;
+
+  pathList.innerHTML = `
+    <h4>路径列表</h4>
+    ${pack.graph.paths.map(path => `
+      <button class="chat-archive-pack-path-row ${path.id === currentPath.id ? 'active' : ''}" data-cap-path="${path.id}">
+        <strong>${escapeHtml(path.title || path.sourceFileName)}</strong>
+        <small>${path.groupIds.length} 楼 · ${escapeHtml(path.sourceFileName || '')}</small>
+      </button>
+    `).join('')}
+  `;
+
+  const visibleGroupIds = getVisibleGroupIds(pack, currentPath);
+  canvas.classList.toggle('right', state.graphLayout === 'right');
+  canvas.innerHTML = visibleGroupIds.map((groupId, index) => {
+    const group = pack.graph.groupsById[groupId];
+    const text = pack.contentBlocks[group.variants?.[0]?.contentBlockId]?.text || '';
+    const active = currentPath.groupIds.includes(groupId);
+    const branchCount = group.childGroupIds?.length || 0;
+    return `
+      <button class="chat-archive-pack-graph-node ${active ? 'active-path' : ''} ${state.selectedGroupId === groupId ? 'selected' : ''}" data-cap-group="${groupId}">
+        <strong>${escapeHtml(getNodeLabel(group))}</strong>
+        <span>${group.floorIndex + 1} 楼 · ${branchCount} 子级</span>
+        <small>${escapeHtml(text).slice(0, 80)}</small>
+      </button>
+      ${index < visibleGroupIds.length - 1 ? '<div class="chat-archive-pack-edge">↓</div>' : ''}
+    `;
   }).join('');
+
+  const selected = pack.graph.groupsById[state.selectedGroupId] || pack.graph.groupsById[currentPath.groupIds[0]];
+  state.selectedGroupId = selected?.id || '';
+  inspector.innerHTML = selected ? `
+    <h4>节点检查器</h4>
+    <div><strong>${escapeHtml(getNodeLabel(selected))}</strong></div>
+    <div class="chat-archive-pack-muted">${selected.floorIndex + 1} 楼 · ${selected.id}</div>
+    <div>父级：${escapeHtml(selected.parentGroupId || '根节点')}</div>
+    <div>子级：${selected.childGroupIds.length}</div>
+    <div>来源路径：${selected.sourceRefs.map(ref => escapeHtml(ref.sourceFileName)).join('、')}</div>
+    <hr>
+    <h4>消息变体</h4>
+    ${(selected.variants || []).map((variant, index) => {
+      const text = pack.contentBlocks[variant.contentBlockId]?.text || '';
+      return `<div class="chat-archive-pack-reader-floor"><strong>${variant.active ? '当前' : `变体 ${index + 1}`}</strong><p>${escapeHtml(text).slice(0, 500)}</p></div>`;
+    }).join('')}
+    <hr>
+    <div>${state.graphEditMode ? '编辑模式已开启：结构改动需要二次确认。' : '查看模式：不会修改绑定关系。'}</div>
+  ` : '选择节点后显示详情。';
+}
+
+function getVisibleGroupIds(pack, currentPath) {
+  if (state.graphView === 'path') {
+    return currentPath.groupIds;
+  }
+  if (state.graphView === 'full') {
+    return pack.graph.floors.flatMap(floor => floor.groups.map(group => group.id));
+  }
+
+  const ids = new Set();
+  for (const groupId of currentPath.groupIds) {
+    const group = pack.graph.groupsById[groupId];
+    if (!group) continue;
+    const isBranchPoint = group.childGroupIds.length > 1;
+    const isLeaf = group.childGroupIds.length === 0;
+    if (isBranchPoint || isLeaf || group.floorIndex < 2 || currentPath.groupIds.includes(state.selectedGroupId)) {
+      ids.add(groupId);
+      group.childGroupIds.forEach(childId => ids.add(childId));
+    }
+  }
+  return [...ids];
+}
+
+function renderDuplicateCandidates() {
+  const container = document.querySelector('#chat_archive_pack_duplicates');
+  if (!container) {
+    return;
+  }
+  const pack = state.pack;
+  if (!pack) {
+    container.textContent = '加载归档包后显示重复候选。';
+    return;
+  }
+  const nearDuplicates = findNearDuplicateTexts(pack);
+  const sameText = pack.mergePreview?.sameTextDifferentContextCount || 0;
+  container.innerHTML = `
+    <h4>重复候选</h4>
+    <p>同文本不同上下文：${sameText} 处。它们共享内容块，但不会自动合并分支分组。</p>
+    <p>近似重复：${nearDuplicates.length} 处。V1 只提示，不自动合并。</p>
+    ${nearDuplicates.map(item => `
+      <div class="chat-archive-pack-reader-floor">
+        <strong>${escapeHtml(item.reason)}</strong>
+        <p>${escapeHtml(item.leftText).slice(0, 180)}</p>
+        <p>${escapeHtml(item.rightText).slice(0, 180)}</p>
+      </div>
+    `).join('')}
+  `;
+}
+
+function renderReleasePanel() {
+  const select = document.querySelector('#chat_archive_pack_original_release_select');
+  const log = document.querySelector('#chat_archive_pack_release_log');
+  if (!select || !log) {
+    return;
+  }
+  const sourceFiles = state.pack?.restoreLedger?.sourceFiles || [];
+  select.innerHTML = sourceFiles.map(source => `<option value="${source.fileName}">${escapeHtml(source.fileName)} · ${source.rawLineCount} 行</option>`).join('');
+  log.innerHTML = `
+    <h4>释放记录</h4>
+    ${state.releaseLog.length ? state.releaseLog.map(item => `
+      <div class="chat-archive-pack-row">
+        <span>${item.type === 'original' ? '原文件' : '路径'}</span>
+        <strong>${escapeHtml(item.fileName)}.jsonl</strong>
+        <small>${item.ok ? '成功' : '失败'} · ${escapeHtml(item.at)}</small>
+      </div>
+    `).join('') : '<div class="chat-archive-pack-muted">还没有释放记录。</div>'}
+  `;
+}
+
+function renderStatusBar() {
+  const status = document.querySelector('#chat_archive_pack_status');
+  if (!status) {
+    return;
+  }
+  const pack = state.pack;
+  const path = getCurrentPath();
+  status.textContent = pack
+    ? `当前包：${pack.packName} · 无损账本：${pack.mergePreview?.restoreLedgerOk ? '正常' : '异常'} · 当前路径：${path?.title || '未选择'}`
+    : '未加载归档包。';
 }
 
 function escapeHtml(value) {
@@ -346,8 +783,10 @@ async function onImportPack(event) {
 
   try {
     state.pack = JSON.parse(await file.text());
+    state.pendingPack = null;
+    state.currentPathId = state.pack?.graph?.activePathId || state.pack?.graph?.paths?.[0]?.id || '';
     rememberPack(getContext(), state.pack);
-    renderPackSummary();
+    renderWorkbench();
     notify('success', '归档包已导入并绑定当前设置。');
   } catch (error) {
     notify('error', `导入失败：${error.message}`);
@@ -357,6 +796,41 @@ async function onImportPack(event) {
 }
 
 async function onPanelClick(event) {
+  const tab = event.target?.dataset?.capTab;
+  if (tab) {
+    state.activeTab = tab;
+    renderWorkbench();
+    return;
+  }
+
+  const packId = event.target?.closest?.('[data-cap-pack]')?.dataset?.capPack;
+  if (packId) {
+    const settings = ensureExtensionSettings(getContext());
+    const pack = settings.packs?.[packId]?.inlinePack;
+    if (pack) {
+      state.pack = clonePack(pack);
+      state.pendingPack = null;
+      state.currentPathId = state.pack?.graph?.activePathId || state.pack?.graph?.paths?.[0]?.id || '';
+      renderWorkbench();
+    }
+    return;
+  }
+
+  const pathId = event.target?.closest?.('[data-cap-path]')?.dataset?.capPath;
+  if (pathId) {
+    state.currentPathId = pathId;
+    renderGraphWorkspace();
+    renderStatusBar();
+    return;
+  }
+
+  const groupId = event.target?.closest?.('[data-cap-group]')?.dataset?.capGroup;
+  if (groupId) {
+    state.selectedGroupId = groupId;
+    renderGraphWorkspace();
+    return;
+  }
+
   const action = event.target?.dataset?.capAction;
   if (!action) {
     return;
@@ -367,9 +841,15 @@ async function onPanelClick(event) {
   if (action === 'select-all') setSelection('all');
   if (action === 'invert') setSelection('invert');
   if (action === 'clear') setSelection('clear');
-  if (action === 'archive') await archiveSelected({ deleteAfter: false });
-  if (action === 'consolidate') await archiveSelected({ deleteAfter: document.querySelector('#chat_archive_pack_delete_after')?.checked });
-  if (action === 'release') await releaseSelectedChat();
+  if (action === 'preview-merge') await previewSelectedArchive();
+  if (action === 'confirm-merge') await commitPendingArchive({ deleteAfter: false });
+  if (action === 'consolidate') await commitPendingArchive({ deleteAfter: document.querySelector('#chat_archive_pack_delete_after')?.checked });
+  if (action === 'release-original') await releaseOriginalChat();
+  if (action === 'release-path') await releasePathChat();
+  if (action === 'open-graph') {
+    state.activeTab = 'graph';
+    renderWorkbench();
+  }
   if (action === 'export') {
     if (!state.pack) {
       notify('warning', '没有可导出的归档包。');
@@ -377,6 +857,10 @@ async function onPanelClick(event) {
     }
     downloadJson(state.pack);
   }
+}
+
+function clonePack(pack) {
+  return pack == null ? pack : JSON.parse(JSON.stringify(pack));
 }
 
 function scheduleAutoTask() {
@@ -410,6 +894,8 @@ function registerApi() {
   registerExtensionApi?.call(context, EXTENSION_NAME, {
     buildArchivePack,
     materializeChat,
+    materializeOriginalJsonl,
+    materializePathChat,
     archiveSelected,
     getCurrentPack: () => state.pack,
   });
